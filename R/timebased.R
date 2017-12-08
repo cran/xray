@@ -1,8 +1,9 @@
 #' Analyze each variable in respect to a time variable
 #'
 #' @param data_analyze a data frame to analyze
-#' @param date_variable the variable that will be used to pivot all other variables
+#' @param date_variable the variable (length one character vector or bare expression) that will be used to pivot all other variables
 #' @param time_unit the time unit to use if not automatically
+#' @param nvals_num_to_cat numeric numeric values with this many or fewer distinct values will be treated as categorical
 #' @param outdir an optional output directory to save the resulting plots as png images
 #'
 #' @examples
@@ -18,35 +19,45 @@
 #' @importFrom utils head
 #' @importFrom stats quantile
 #' @importFrom stats setNames
+#' @importFrom utils setTxtProgressBar
+#' @importFrom utils txtProgressBar
 #'
-timebased <- function(data_analyze, date_variable, time_unit="auto", outdir) {
+timebased <- function(data_analyze, date_variable, time_unit="auto",
+                      nvals_num_to_cat=2,outdir) {
+
+
+  # Remove nulls
+  data_analyze = filter(data_analyze, !is.na(!!date_variable))
+
+  if(inherits(data_analyze, 'tbl_sql')){
+    # Collect up to 100k samples
+    print("Remote data source, collecting up to 100k sample rows")
+    data_analyze = collect(data_analyze, n=100000)
+  }
 
   # Obtain metadata for the dataset
   varMetadata = suppressWarnings(anomalies(data_analyze)$variables)
 
-  # If it's remote, bring it home, and remove nulls
-  data_analyze = filter(data_analyze, !is.na(!!date_variable)) %>%  collect()
+  dateData = pull(data_analyze, date_variable)
 
-  dateData = data_analyze[[date_variable]]
-
-  if('POSIXct' %in% class(dateData) | 'POSIXlt' %in% class(dateData)){
+  if(inherits(dateData, 'POSIXct') || inherits(dateData, 'POSIXlt')){
     # Remove timezone
     attr(dateData, "tzone") <- "UTC"
 
-  }else if(! 'Date' %in% class(dateData)){
+  }else if(! inherits(dateData, 'Date')){
     # Not a Date nor a POSIXct/POSIXlt, what are you giving me?
 
-    if('character' %in% class(dateData) | 'factor' %in% class(dateData)){ #Try to convert strings
+    if(is.character(dateData) || is.factor(dateData)){ #Try to convert strings
       dateData = as.Date(as.character(dateData))
     }else{
-      warning('You need to specify a date variable as the second parameter')
+      warning('You need to specify a date variable as the second parameter.')
       return()
     }
   }
 
   #Determine time unit
   if(time_unit == 'auto'){
-    timeRange = as.double(difftime(max(dateData, na.rm=T), min(dateData, na.rm=T), units='secs'))
+    timeRange = as.double(difftime(max(dateData, na.rm=TRUE), min(dateData, na.rm=TRUE), units='secs'))
     min=60
     hour=min*60
     day=hour*24
@@ -64,53 +75,63 @@ timebased <- function(data_analyze, date_variable, time_unit="auto", outdir) {
 
   # Start rolling baby!
   i=0
+  pb <- txtProgressBar(0, nrow(varMetadata)) # Progress bar
   resVars = c()
-  results = foreach::foreach(i=1:nrow(varMetadata)) %do% {
+  results = foreach::foreach(i=seq_len(nrow(varMetadata))) %do% {
     var=varMetadata[i,]
     varName=as.character(var$Variable)
-    if(var$pNA==1){
+    setTxtProgressBar(pb, i)
+    if(var$pNA=='100%'){
       #All null
-      warning(paste0("The variable ", varName, " is completely NA, can't plot that."))
+      warning("The variable ", varName, " is completely NA, can't plot that.")
       return()
-    }else if(var$Variable == date_variable){
+    }else if(var$Variable == quo_name(date_variable)) {
       #Do nothing when date var
       return()
     }else if(!var$type %in% c('Integer', 'Logical', 'Numeric', 'Factor', 'Character')){
       #Do not try to plot anything
-      warning(paste0('Ignoring variable ', varName, ': Unsupported type for visualization'))
+      warning('Ignoring variable ', varName, ': Unsupported type for visualization.')
       return()
     }else{
       resVars=c(resVars,varName)
 
-      if(var$type %in% c('Integer', 'Numeric')){
+      if(var$type %in% c('Numeric','Integer') &
+         var$qDistinct > nvals_num_to_cat){
         # Box plot for visualizing difference in distribution among time
 
         varAnalyze = data.frame(dat=as.double(data_analyze[[varName]]), date=as.factor(dateData))
 
         ylim1 = boxplot.stats(varAnalyze$dat)$stats[c(1, 5)]
+        yrange = ylim1[2]-ylim1[1]
 
         ggplot(varAnalyze, aes(date, dat)) +
-          geom_boxplot(fill='#ccccff', outlier.color = 'red', outlier.shape=1, na.rm=T) +
+          geom_boxplot(fill='#ccccff', outlier.color = 'red', outlier.shape=1, na.rm=TRUE) +
           theme_minimal() +
           labs(x = varName, y = "Rows") +
-          coord_cartesian(ylim = ylim1*1.1) +
-          ggtitle(paste0("Histogram of ", var$Variable)) +
+          coord_cartesian(ylim = ylim1+c(-0.1*yrange,0.1*yrange)) +
+          ggtitle(paste("Histogram of", var$Variable)) +
           theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
       }else{
         # 100% stacked barchart showing difference in categorical composition
-
         varAnalyze = data.frame(dat=as.character(data_analyze[[varName]]), date=dateData)
-        topten = group_by(varAnalyze, dat) %>% count() %>% arrange(-n)
-        if(nrow(topten) > 10){
-          topten=head(topten, 10)
-          warning(paste0("On variable ", varName, ", more than 10 distinct variables found, only using top 10 for visualization."))
+        topvars = group_by(varAnalyze, dat) %>% count() %>% arrange(-n) %>% ungroup()
+        topten=topvars
+        if(nrow(topvars) > 10){
+          topten=head(topvars, 10)
+          warning("On variable ", varName, ", more than 10 distinct variables found, only using top 10 for visualization.")
+          others = anti_join(varAnalyze, topten, by='dat') %>%
+            group_by(date) %>% count() %>% ungroup() %>%
+            mutate(dat='Others') %>% select(date, dat, n)
         }
 
-        grouped = filter(varAnalyze, !is.na(dat)) %>%
-          group_by(date, dat) %>%
+        grouped = group_by(varAnalyze, date, dat) %>%
           semi_join(topten, by='dat') %>%
-          count() %>% arrange(date,-n)
+          count() %>% arrange(date, -n) %>% ungroup()
+
+        if(nrow(topvars)>10){
+          grouped = rbind(grouped, others)
+        }
 
         abbr = function (x) {return (abbreviate(x, minlength = 10))}
 
@@ -121,19 +142,20 @@ timebased <- function(data_analyze, date_variable, time_unit="auto", outdir) {
           scale_fill_brewer(palette='Paired', label=abbr) +
           theme_minimal() +
           labs(x = var$Variable, y = "Rows", fill=varName) +
-          ggtitle(paste0("Evolution of variable ", varName)) +
+          ggtitle(paste("Evolution of variable", varName)) +
           theme(axis.text.x = element_text(angle = 45, hjust = 1))
       }
     }
 
   }
+  close(pb)
 
-  results[sapply(results, is.null)] <- NULL
+  results[vapply(results, is.null, logical(1))] <- NULL
   batches = ceiling(length(results)/4)
 
-  foreach::foreach(i=1:batches) %do% {
+  foreach::foreach(i=seq_len(batches)) %do% {
     firstPlot=((i-1)*4)+1
-    lastPlot=min(firstPlot+3, length(results))
+    lastPlot=min(firstPlot+3, length(results), na.rm=T)
     if(lastPlot==firstPlot){
       plot(results[[firstPlot]])
     }else{
@@ -157,10 +179,10 @@ timebased <- function(data_analyze, date_variable, time_unit="auto", outdir) {
 
 
   if(!missing(outdir)){
-    foreach::foreach(i=1:length(results)) %do% {
-      ggsave(filename=paste0(outdir, '/', gsub('[^a-z0-9 ]','_', tolower(resVars[[i]])), '.png'), plot=results[[i]])
+    foreach::foreach(i=seq_along(results)) %do% {
+      ggsave(filename=file.path(outdir, paste0(gsub('[^a-z0-9 ]','_', tolower(resVars[[i]])), '.png')), plot=results[[i]])
     }
   }
 
-  return(paste0(length(results), " charts have been generated."))
+  message(length(results), " charts have been generated.")
 }

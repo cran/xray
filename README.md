@@ -3,12 +3,20 @@
 xray
 ====
 
-The R Package to have X Ray vision on your datasets. This package lets you analyze the variables of a dataset, to evaluate how is the shape of your data. Consider this the first step when you have your data for modeling, you can use this package to analyze all variables and check if there is anything weird worth transforming or even avoiding the variable altogether.
+[![Travis-CI Build Status](https://travis-ci.org/sicarul/xray.svg?branch=master)](https://travis-ci.org/sicarul/xray) [![CRAN\_Status\_Badge](http://www.r-pkg.org/badges/version/xray)](https://cran.r-project.org/package=xray) [![CRAN\_Downloads\_Badge](https://cranlogs.r-pkg.org/badges/xray)](https://cran.r-project.org/package=xray)
+
+The R Package to have X Ray vision on your datasets. This package lets you analyze the variables of a dataset, to evaluate how is your data shaped. Consider this the first step when you have your data for modeling, you can use this package to analyze all variables and check if there is anything weird worth transforming or even avoiding the variable altogether.
 
 Installation
 ------------
 
-You can install xray from github with:
+You can install the stable version of xray from CRAN with:
+
+``` r
+install.packages("xray")
+```
+
+Or the latest dev version from Github:
 
 ``` r
 # install.packages("devtools")
@@ -32,28 +40,28 @@ xray::anomalies(badLongley)
 #> Warning in xray::anomalies(badLongley): Found 1 possible problematic variables: 
 #> GNP
 #> $variables
-#>       Variable  q qNA pNA qZero pZero qBlank pBlank qInf pInf qDistinct
-#> 1          GNP 16  16   1     0     0      0      0    0    0         1
-#> 2 GNP.deflator 16   0   0     0     0      0      0    0    0        16
-#> 3   Unemployed 16   0   0     0     0      0      0    0    0        16
-#> 4 Armed.Forces 16   0   0     0     0      0      0    0    0        16
-#> 5   Population 16   0   0     0     0      0      0    0    0        16
-#> 6         Year 16   0   0     0     0      0      0    0    0        16
-#> 7     Employed 16   0   0     0     0      0      0    0    0        16
+#>       Variable  q qNA  pNA qZero pZero qBlank pBlank qInf pInf qDistinct
+#> 1          GNP 16  16 100%     0     -      0      -    0    -         1
+#> 2 GNP.deflator 16   0    -     0     -      0      -    0    -        16
+#> 3   Unemployed 16   0    -     0     -      0      -    0    -        16
+#> 4 Armed.Forces 16   0    -     0     -      0      -    0    -        16
+#> 5   Population 16   0    -     0     -      0      -    0    -        16
+#> 6         Year 16   0    -     0     -      0      -    0    -        16
+#> 7     Employed 16   0    -     0     -      0      -    0    -        16
 #>      type anomalous_percent
-#> 1 Logical                 1
-#> 2 Numeric                 0
-#> 3 Numeric                 0
-#> 4 Numeric                 0
-#> 5 Numeric                 0
-#> 6 Integer                 0
-#> 7 Numeric                 0
+#> 1 Logical              100%
+#> 2 Numeric                 -
+#> 3 Numeric                 -
+#> 4 Numeric                 -
+#> 5 Numeric                 -
+#> 6 Integer                 -
+#> 7 Numeric                 -
 #> 
 #> $problem_variables
-#>   Variable  q qNA pNA qZero pZero qBlank pBlank qInf pInf qDistinct
-#> 1      GNP 16  16   1     0     0      0      0    0    0         1
+#>   Variable  q qNA  pNA qZero pZero qBlank pBlank qInf pInf qDistinct
+#> 1      GNP 16  16 100%     0     -      0      -    0    -         1
 #>      type anomalous_percent
-#> 1 Logical                 1
+#> 1 Logical              100%
 #>                                                              problems
 #> 1 Anomalies present in 100% of the rows. Less than 2 distinct values.
 ```
@@ -66,6 +74,7 @@ xray::anomalies(badLongley)
 distrLongley=longley
 distrLongley$testCategorical=c(rep('One',7), rep('Two', 9))
 xray::distributions(distrLongley)
+#> ===========================================================================
 ```
 
 ![](tools/README-example-distributions-1.png)![](tools/README-example-distributions-2.png)
@@ -99,8 +108,11 @@ ndateLongley=dateLongley
 ndateLongley$GNP=dateLongley$GNP+10
 ndateLongley$Data='Offseted'
 xray::timebased(rbind(dateLongley, ndateLongley), 'Year')
+#> ===========================================================================
 ```
 
-![](tools/README-example-timebased-1.png)![](tools/README-example-timebased-2.png)
+![](tools/README-example-timebased-1.png)
 
-    #> [1] "7 charts have been generated."
+    #> 7 charts have been generated.
+
+![](tools/README-example-timebased-2.png)
